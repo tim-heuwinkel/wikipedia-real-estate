@@ -74,7 +74,7 @@ def process_article(title, text, timestamp, coord_range_lat, coord_range_long, t
 class WikiXmlHandler(xml.sax.handler.ContentHandler):
     """Parse through XML data using SAX"""
 
-    def __init__(self):
+    def __init__(self, usa):
         xml.sax.handler.ContentHandler.__init__(self)
         self._buffer = None
         self._values = {}
@@ -82,6 +82,7 @@ class WikiXmlHandler(xml.sax.handler.ContentHandler):
         self._articles = []
         self._article_count = 0
         self._non_matches = []
+        self._usa = usa
 
     def characters(self, content):
         """Characters between opening and closing tags"""
@@ -101,9 +102,15 @@ class WikiXmlHandler(xml.sax.handler.ContentHandler):
 
         if name == 'page':
             self._article_count += 1
-            # rough coordinates of Allegheny region
-            COORD_RANGE_LAT = (40.000000, 40.870000)
-            COORD_RANGE_LONG = (-80.550000, -79.500000)
+
+            if self._usa:
+                # rough coordinates of the USA
+                COORD_RANGE_LAT = (25.11667, 49.040000)
+                COORD_RANGE_LONG = (-125.666666, -59.815000)
+            else:
+                # rough coordinates of Allegheny region
+                COORD_RANGE_LAT = (40.000000, 40.870000)
+                COORD_RANGE_LONG = (-80.550000, -79.500000)
 
             # Search through the page to see if the coordinate is in the Allegheny region
             article = process_article(**self._values, coord_range_lat=COORD_RANGE_LAT,
@@ -113,13 +120,15 @@ class WikiXmlHandler(xml.sax.handler.ContentHandler):
                 self._articles.append(article)
 
 
-def find_articles(data_path, limit=None, save=True):
+def find_articles(input, limit=None, save=True):
     """Find all the articles in specified region from a compressed wikipedia XML dump.
        `limit` is an optional argument to only return a set number of articles.
         If save, articles are saved to a partition directory based on file name"""
 
+    data_path, usa = input
+
     # Object for handling xml
-    handler = WikiXmlHandler()
+    handler = WikiXmlHandler(usa)
 
     # Parsing object
     parser = xml.sax.make_parser()
@@ -137,7 +146,11 @@ def find_articles(data_path, limit=None, save=True):
             return handler._articles
 
     if save:
-        partition_dir = os.path.dirname(os.path.dirname(data_path)) + "\\uncompressed\\"
+        if usa:
+            partition_dir = os.path.dirname(os.path.dirname(data_path)) + "\\uncompressed_usa\\"
+        else:
+            partition_dir = os.path.dirname(os.path.dirname(data_path)) + "\\uncompressed\\"
+
         if not os.path.exists(partition_dir):
             os.mkdir(partition_dir)
 
@@ -159,13 +172,16 @@ def find_articles(data_path, limit=None, save=True):
     return None
 
 
-def process(compressed_path, cores):
+def process(compressed_path, usa, cores):
     """Decompress all articles in compressed_path, look for templates and save articles fitting criteria"""
 
-    partitions = [compressed_path + file for file in os.listdir(compressed_path) if 'xml-p' in file]
+    partitions = [(compressed_path + file, usa) for file in os.listdir(compressed_path) if 'xml-p' in file]
     len(partitions), partitions[-1]
 
-    uncompressed_path = os.path.dirname(os.path.dirname(compressed_path)) + "\\uncompressed"
+    if usa:
+        uncompressed_path = os.path.dirname(os.path.dirname(compressed_path)) + "\\uncompressed_usa"
+    else:
+        uncompressed_path = os.path.dirname(os.path.dirname(compressed_path)) + "\\uncompressed"
 
     if not len(os.listdir(uncompressed_path)) > 50:  # check if already preprocessed
         pool = Pool(processes=cores)
@@ -247,6 +263,8 @@ def create_text_cols(row_outer, places_df, tf_matrix, feature_names, max_dist):
             weight = 1 - (dist / max_dist)  # calculate weight between 0 and 1
             in_range.append(tf_matrix[index] * weight)  # multiply tfs by weight
 
+            # in_range.append(tf_matrix[index])  # <- NO WEIGHTING
+
     if len(in_range) < 3:
         # less than 3 articles found inside max_dist radius
         row_outer["article_count"] = len(in_range)
@@ -255,7 +273,8 @@ def create_text_cols(row_outer, places_df, tf_matrix, feature_names, max_dist):
     else:
         # calculate mean of weighted term frequencies and assign to word columns
         article_count = len(in_range)
-        row_outer.loc[feature_names[0]:feature_names[-1]] = [sum(x)/article_count for x in zip(*in_range)]
+        row_outer.loc[feature_names[0]:feature_names[-1]] = [sum(x) / article_count for x in zip(*in_range)]
+        # row_outer.loc[feature_names[0]:feature_names[-1]] = [sum(x) for x in zip(*in_range)]  # just sum
         row_outer["article_count"] = article_count
 
     return row_outer
@@ -301,9 +320,114 @@ def process_text_features(df_structured, places_df, tf_matrix, feature_names, ma
     return pd.concat(results, ignore_index=True)
 
 
+def create_doc2vec_cols(row_outer, places_df, vector_size, max_dist):
+    """Returns row along with mean of weighted doc2vec vector for articles closer than max_dist for property in row"""
+
+    in_range = []
+    for index, row in places_df.iterrows():
+        dist = distance.distance(row["coords"], [row_outer["latitude"], row_outer["longitude"]]).m
+        if dist < max_dist:
+            # article is closer than max_dist m
+            weight = 1 - (dist / max_dist)  # calculate weight between 0 and 1
+            in_range.append(places_df.loc[index, "vec_1":] * weight)  # multiply tfs by weight
+
+    if len(in_range) < 3:
+        # less than 3 articles found inside max_dist radius
+        row_outer["article_count"] = len(in_range)
+        in_range = [pd.NA] * len(vector_size)
+        row_outer.loc["vec_1":] = in_range
+    else:
+        # calculate mean of weighted term frequencies and assign to word columns
+        article_count = len(in_range)
+        feature_shit = row_outer.loc["vec_1":]
+        print(f"in_range: {len(in_range)}, row: {feature_shit.shape}")
+        # row_outer.loc["vec_1":] = [sum(x) / article_count for x in zip(*in_range)]  # with mean
+        row_outer.loc["vec_1":] = [sum(x) for x in zip(*in_range)]  # just sum
+        row_outer["article_count"] = article_count
+
+    return row_outer
+
+
+def create_doc2vec_cols_k_closest(row_outer, places_df, vector_size, max_dist):
+    """Returns row along with mean of weighted doc2vec vector for articles closer than max_dist for property in row"""
+
+    # in_range = []
+    # for index, row in places_df.iterrows():
+    #     dist = distance.distance(row["coords"], [row_outer["latitude"], row_outer["longitude"]]).m
+    #     if dist < max_dist:
+    #         # article is closer than max_dist m
+    #         weight = 1 - (dist / max_dist)  # calculate weight between 0 and 1
+    #         in_range.append(places_df.loc[index, "vec_1":] * weight)  # multiply tfs by weight
+
+    dist_df = places_df.copy()
+    dist_df["dist"] = dist_df.apply(
+        lambda x: distance.distance(x["coords"], [row_outer["latitude"], row_outer["longitude"]]).m, axis=1)
+    dist_df.sort_values(by=["dist"], inplace=True, ascending=True)  # sort by closest distance
+    dist_df = dist_df.iloc[:10, :]
+
+    # WEIGHTS?
+
+    dist_df.drop(["dist"], axis=1, inplace=True)
+    dist_df = dist_df.loc[:, "vec_1":]
+
+    in_range = dist_df.to_numpy()
+
+    # calculate mean of weighted term frequencies and assign to word columns
+    article_count = dist_df.shape[0]
+    # row_outer.loc["vec_1":] = [sum(x) / article_count for x in zip(*in_range)]  # with mean
+    row_outer.loc["vec_1":] = [sum(x) for x in zip(*in_range)]  # just sum
+    row_outer["article_count"] = article_count
+
+    return row_outer
+
+
+def add_doc2vec_features(input):
+    """Multiprocessing service for process_text_features"""
+
+    df_structured, places_df, max_dist = input
+    vector_size = len([x for x in places_df.columns if "vec_" in x])
+
+    # add column for amount of articles found
+    row_count = df_structured.shape[0]
+    df_structured["article_count"] = [0]*row_count
+
+    for feature in ["vec_"+str(i) for i in range(1, vector_size+1)]:
+        # add column for each word
+        df_structured[feature] = [0]*row_count
+
+    df_structured = df_structured.apply(create_doc2vec_cols, axis=1, result_type="broadcast",
+                                        args=[places_df, vector_size, max_dist])
+    # df_structured = df_structured.apply(create_doc2vec_cols_k_closest, axis=1, result_type="broadcast",
+    #                                     args=[places_df, vector_size, max_dist])
+
+    gc.collect()  # memory management
+    return df_structured
+
+
+def process_doc2vec_features(df_structured, places_df, max_dist, cores):
+    """Returns structured df with added doc2vec features"""
+
+    partitions = np.array_split(df_structured, 100)  # divide dataframe into 100 parts
+    # add reference to places and tf data
+    partitions = [(df, places_df, max_dist) for df in partitions]
+
+    pool = Pool(processes=cores)
+    results = []
+
+    # Run partitions in parallel
+    for x in tqdm(pool.imap_unordered(add_doc2vec_features, partitions), total=len(partitions)):
+        results.append(x)
+
+    pool.close()
+    pool.join()
+
+    return pd.concat(results, ignore_index=True)
+
+
 # wrap execution in main method to guard multiprocessing code
 if __name__ == "__main__":
     __spec__ = None  # remove spec to be able to run this script from iPython (Jupyter Notebook)
     compressed_path = sys.argv[1]
     cores = int(sys.argv[2])
     process(compressed_path, cores)
+
