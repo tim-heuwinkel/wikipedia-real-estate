@@ -17,7 +17,7 @@ def make_train_test(df):
     """Returns train/test sets along with column names and df for saving errors"""
 
     X = df.drop(["PROPERTYZIP", "MUNICODE", "SCHOOLCODE", "NEIGHCODE", "SALEDATE", "SALEPRICE",
-                 "FAIRMARKETTOTAL", "latitude", "longitude", "SALEYEAR"], axis=1)
+                 "FAIRMARKETTOTAL", "latitude", "longitude", "SALEYEAR", "DISTRICT"], axis=1)
 
     # save col names for later
     X_columns = list(X.columns)
@@ -110,4 +110,70 @@ def cross_validation(estimator, X, y, k_folds):
     print(f"R^2:  {r_squared_cv}")
 
     return mae_cv, rmse_cv, mape_cv, r_squared_cv
+
+
+def soos_validation(estimator, df):
+    soos_df = df.copy()
+    soos_df = soos_df.sample(frac=1).reset_index(drop=True)  # shuffle data
+    soos_df.sort_values(by=["DISTRICT"])  # sort by district
+
+    error_df_soos = pd.DataFrame(
+        data={"id": soos_df["_id"],
+              "lat": soos_df["latitude"],
+              "long": soos_df["longitude"],
+              "district": soos_df["DISTRICT"],
+              "prediction": 0,
+              "error": 0})
+
+    y_preds = []
+    errors = []
+    maes, rmses, mapes, r_squareds = [], [], [], []
+
+    for i in range(1, 14):
+        train = soos_df[soos_df["DISTRICT"] != "district_"+str(i)]  # leave out i'th district
+        test = soos_df[soos_df["DISTRICT"] == "district_"+str(i)]
+
+        train = train.drop(["_id", "PROPERTYZIP", "SCHOOLCODE", "NEIGHCODE", "SALEDATE",
+                            "FAIRMARKETTOTAL", "latitude", "longitude", "SALEYEAR", "DISTRICT"], axis=1)
+        test = test.drop(["_id", "PROPERTYZIP", "SCHOOLCODE", "NEIGHCODE", "SALEDATE",
+                          "FAIRMARKETTOTAL", "latitude", "longitude", "SALEYEAR", "DISTRICT"], axis=1)
+
+        X_train = train.drop(["SALEPRICE"], axis=1).to_numpy()
+        y_train = train["SALEPRICE"].to_numpy()
+
+        X_test = test.drop(["SALEPRICE"], axis=1).to_numpy()
+        y_test = test["SALEPRICE"].to_numpy()
+
+        if "linear_model" in str(type(estimator)):
+            estimator.fit(X=X_train, y=y_train)
+        else:
+            estimator.fit(X=X_train, y=y_train, verbose=False)
+
+        y_pred_cv = estimator.predict(X_test)
+        y_preds.extend(y_pred_cv)
+        errors.extend([test - pred for test, pred in zip(y_test, y_pred_cv)])
+
+        mae, rmse, mape, r_squared = get_metrics(y_test, y_pred_cv, print_out=False)
+        maes.append(mae)
+        rmses.append(rmse)
+        mapes.append(mape)
+        r_squareds.append(r_squared)
+
+        print(f"Predicting district {i}/13")
+
+    error_df_soos["prediction"] = y_preds
+    error_df_soos["error"] = errors
+
+    avg_mae = np.mean(maes)
+    avg_rmse = np.mean(rmses)
+    avg_mape = np.mean(mapes)
+    avg_r2 = np.mean(r_squareds)
+    print("")
+    print("Average metrics:")
+    print(f"MAE:  {round(avg_mae)}")
+    print(f"RMSE: {round(avg_rmse)}")
+    print(f"MAPE: {round(avg_mape, 2)}%")
+    print(f"R^2:  {round(avg_r2, 3)}")
+
+    return error_df_soos, [maes, rmses, mapes, r_squareds]
 
