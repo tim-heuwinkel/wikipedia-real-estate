@@ -210,8 +210,8 @@ def create_dist_cols(row, category, df_category):
     count = df_category_copy[df_category_copy["dist"] < 2500].shape[0]  # count closer than 2.5 km
     closest = df_category_copy["dist"].min()  # minimum distance to object for this category
 
-    row[category + "_count"] = count  # add mean of k shortest distances
-    row[category + "_dist"] = closest  # add shortest distance to col
+    row[category + "_count"] = count
+    row[category + "_dist"] = closest
 
     return row
 
@@ -252,7 +252,7 @@ def process_dist_features(df_structured, categories_dfs, cores):
     return pd.concat(results, ignore_index=True)
 
 
-def create_text_cols(row_outer, places_df, tf_matrix, feature_names, max_dist, weighted):
+def create_text_cols(row_outer, places_df, tf_matrix, feature_names, max_dist, weighted, mean):
     """Returns row along with mean of weighted term frequencies for articles closer than max_dist for property in row"""
 
     in_range = []
@@ -274,8 +274,10 @@ def create_text_cols(row_outer, places_df, tf_matrix, feature_names, max_dist, w
     else:
         # calculate mean of weighted term frequencies and assign to word columns
         article_count = len(in_range)
-        row_outer.loc[feature_names[0]:feature_names[-1]] = [sum(x) / article_count for x in zip(*in_range)]
-        # row_outer.loc[feature_names[0]:feature_names[-1]] = [sum(x) for x in zip(*in_range)]  # just sum
+        if mean:
+            row_outer.loc[feature_names[0]:feature_names[-1]] = [sum(x) / article_count for x in zip(*in_range)]
+        else:
+            row_outer.loc[feature_names[0]:feature_names[-1]] = [sum(x) for x in zip(*in_range)]  # just sum
         row_outer["article_count"] = article_count
 
     return row_outer
@@ -284,7 +286,7 @@ def create_text_cols(row_outer, places_df, tf_matrix, feature_names, max_dist, w
 def add_text_features(input):
     """Multiprocessing service for process_text_features"""
 
-    df_structured, places_df, tf_matrix, feature_names, max_dist, weighting = input
+    df_structured, places_df, tf_matrix, feature_names, max_dist, weighting, mean = input
 
     row_count = df_structured.shape[0]
     for word in feature_names:
@@ -295,18 +297,18 @@ def add_text_features(input):
     df_structured["article_count"] = [0]*row_count
 
     df_structured = df_structured.apply(create_text_cols, axis=1, result_type="broadcast",
-                                        args=[places_df, tf_matrix, feature_names, max_dist, weighting])
+                                        args=[places_df, tf_matrix, feature_names, max_dist, weighting, mean])
 
     gc.collect()  # memory management
     return df_structured
 
 
-def process_text_features(df_structured, places_df, tf_matrix, feature_names, max_dist, cores, weighting):
+def process_text_features(df_structured, places_df, tf_matrix, feature_names, max_dist, cores, weighting, mean):
     """Returns structured df with added text based features"""
 
     partitions = np.array_split(df_structured, 100)  # divide dataframe into 100 parts
     # add reference to places and tf data
-    partitions = [(df, places_df, tf_matrix, feature_names, max_dist, weighting) for df in partitions]
+    partitions = [(df, places_df, tf_matrix, feature_names, max_dist, weighting, mean) for df in partitions]
 
     pool = Pool(processes=cores)
     results = []

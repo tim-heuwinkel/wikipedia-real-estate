@@ -11,9 +11,10 @@ import gc
 from multiprocessing import Pool
 
 
-def remove_category_duplicates(df):
+def remove_category_duplicates(input):
     """Multiprocessing service for remove_duplicates"""
 
+    df, max_dist_dup = input
     df_inner = df.copy()
 
     for index, row in df.iterrows():
@@ -23,7 +24,7 @@ def remove_category_duplicates(df):
                 coords_outer = row.loc["latitude":"longitude"]
                 coords_inner = row_inner.loc["latitude":"longitude"]
 
-                if distance.distance(coords_outer, coords_inner).m < 8:
+                if distance.distance(coords_outer, coords_inner).m < max_dist_dup:
                     # remove row, since duplicate has been found
                     df.drop([index], axis=0, inplace=True)
                     df_inner.drop([index_inner], axis=0, inplace=True)
@@ -33,10 +34,11 @@ def remove_category_duplicates(df):
     return df
 
 
-def remove_duplicates(df, cores):
+def remove_duplicates(df, cores, max_dist_dup):
     """Removes duplicates from df"""
 
     partitions = [df[df["asset_type"] == category].copy() for category in pd.unique(df["asset_type"])]
+    partitions = [(df, max_dist_dup) for df in partitions]
 
     pool = Pool(processes=cores)
     results = []
@@ -48,9 +50,7 @@ def remove_duplicates(df, cores):
     pool.close()
     pool.join()
 
-    full_filtered_df = pd.concat(results)
-
-    return full_filtered_df
+    return pd.concat(results)
 
 
 def calc_dist(row):
