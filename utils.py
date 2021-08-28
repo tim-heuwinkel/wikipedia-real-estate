@@ -1,10 +1,9 @@
 import numpy as np
+import math
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, r2_score, mean_squared_error
 from sklearn.model_selection import train_test_split, KFold
 from tqdm.notebook import tqdm
-
-from catboost import CatBoostRegressor
 
 
 def _find_coord(x, df):
@@ -169,10 +168,33 @@ def get_metrics(y_true, y_pred, print_out=True):
     return mae, rmse, mape, r_squared
 
 
-def cross_validation(estimator, X, y, k_folds, additional_drops=[], verbose_drop=True):
+def get_group_importance(fi, cols):
+
+    struct_end = -1
+    text_end = -1
+    for i, word in enumerate(cols):
+        if "ROOFDESC_" in word:
+            struct_end = i + 1
+        elif "MUNICODE" in word:
+            text_end = i
+            break
+    
+    struct_fi = sum(fi[:struct_end])
+
+    if text_end == -1:
+        text_fi = sum(fi[struct_end:])
+        return [struct_fi, text_fi]
+    else:
+        text_fi = sum(fi[struct_end:text_end])
+        muni_fi = sum(fi[text_end:])
+        return [struct_fi, text_fi, muni_fi]
+
+
+def cross_validation(estimator, X, y, k_folds, additional_drops=[], verbose_drop=True, return_std=False):
     """Returns and prints cross validated MAE, RMSE, MAPE and R^2"""
 
     maes, rmses, mapes, r_squareds = [], [], [], []
+    fis = []
     X_cv = X.drop(["_id"], axis=1)  # remove "_id" column
     X_cv_cols = X.columns
 
@@ -202,8 +224,11 @@ def cross_validation(estimator, X, y, k_folds, additional_drops=[], verbose_drop
 
         if "linear_model" in str(type(estimator)):
             estimator.fit(X=X_train, y=y_train)
+            fis.append([])
         else:
             estimator.fit(X=X_train, y=y_train, verbose=False)
+            fis_current = get_group_importance(estimator.get_feature_importance(), X_cv_cols)
+            fis.append(fis_current)
 
         y_pred_cv = estimator.predict(X_test)
         mae, rmse, mape, r_squared = get_metrics(y_test, y_pred_cv, print_out=False)
@@ -214,6 +239,7 @@ def cross_validation(estimator, X, y, k_folds, additional_drops=[], verbose_drop
 
     mae_cv, rmse_cv = round(np.mean(maes)), round(np.mean(rmses))
     mape_cv, r_squared_cv = round(np.mean(mapes), 2), round(np.mean(r_squareds), 3)
+    fis_cv = np.mean(fis, axis=0)
 
     print("")
     print(f"MAE:  {mae_cv}")
