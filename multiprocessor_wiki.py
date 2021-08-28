@@ -188,7 +188,7 @@ def process(compressed_path, usa, cores):
         results = []
 
         # Run partitions in parallel
-        for x in tqdm(pool.imap_unordered(find_articles, partitions), total=len(partitions)):
+        for x in tqdm(pool.imap(find_articles, partitions), total=len(partitions)):
             results.append(x)
 
         pool.close()
@@ -243,7 +243,7 @@ def process_dist_features(df_structured, categories_dfs, cores):
     results = []
 
     # Run partitions in parallel
-    for x in tqdm(pool.imap_unordered(add_dist_features, partitions), total=len(partitions)):
+    for x in tqdm(pool.imap(add_dist_features, partitions), total=len(partitions)):
         results.append(x)
 
     pool.close()
@@ -314,7 +314,7 @@ def process_text_features(df_structured, places_df, tf_matrix, feature_names, ma
     results = []
 
     # Run partitions in parallel
-    for x in tqdm(pool.imap_unordered(add_text_features, partitions), total=len(partitions)):
+    for x in tqdm(pool.imap(add_text_features, partitions), total=len(partitions)):
         results.append(x)
 
     pool.close()
@@ -418,7 +418,7 @@ def process_doc2vec_features(df_structured, places_df, max_dist, cores):
     results = []
 
     # Run partitions in parallel
-    for x in tqdm(pool.imap_unordered(add_doc2vec_features, partitions), total=len(partitions)):
+    for x in tqdm(pool.imap(add_doc2vec_features, partitions), total=len(partitions)):
         results.append(x)
 
     pool.close()

@@ -108,7 +108,7 @@ def process_dist_features(gis_df, df_structured, count_radius, cores):
     results = []
 
     # Run partitions in parallel
-    for x in tqdm(pool.imap_unordered(add_dist_features, partitions), total=len(partitions)):
+    for x in tqdm(pool.imap(add_dist_features, partitions), total=len(partitions)):
         results.append(x)
 
     pool.close()
