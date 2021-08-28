@@ -241,16 +241,24 @@ def cross_validation(estimator, X, y, k_folds, additional_drops=[], verbose_drop
     mape_cv, r_squared_cv = round(np.mean(mapes), 2), round(np.mean(r_squareds), 3)
     fis_cv = np.mean(fis, axis=0)
 
+    mae_std = round(math.sqrt(np.mean((maes - np.mean(maes))**2)))
+    rmse_std = round(math.sqrt(np.mean((rmses - np.mean(rmses))**2)))
+    mape_std = round(math.sqrt(np.mean((mapes - np.mean(mapes))**2)), 2)
+    r_squared_std = round(math.sqrt(np.mean((r_squareds - np.mean(r_squareds))**2)), 3)
+
     print("")
-    print(f"MAE:  {mae_cv}")
-    print(f"RMSE: {rmse_cv}")
-    print(f"MAPE: {mape_cv}%")
-    print(f"R^2:  {r_squared_cv}")
+    print(f"MAE:  {mae_cv} \u00B1 {mae_std}")
+    print(f"RMSE: {rmse_cv} \u00B1 {rmse_std}")
+    print(f"MAPE: {mape_cv} \u00B1 {mape_std}%")
+    print(f"R^2:  {r_squared_cv} \u00B1 {r_squared_std}")
 
-    return [mae_cv, rmse_cv, mape_cv, r_squared_cv], X_cv_cols
+    if return_std:
+        return [mae_cv, rmse_cv, mape_cv, r_squared_cv], [mae_std, rmse_std, mape_std, r_squared_std], X_cv_cols, fis_cv
+    else:
+        return [mae_cv, rmse_cv, mape_cv, r_squared_cv], X_cv_cols, fis_cv
 
 
-def soos_validation(estimator, df, additional_drops=[], verbose_drop=True, standardize=False):
+def soos_validation(estimator, df, additional_drops=[], verbose_drop=True, standardize=False, return_std=False):
     soos_df = df.copy()
     soos_df = soos_df.sample(frac=1, random_state=42).reset_index(drop=True)  # shuffle data
     soos_df.sort_values(by=["DISTRICT"])  # sort by district
@@ -342,14 +350,22 @@ def soos_validation(estimator, df, additional_drops=[], verbose_drop=True, stand
     avg_mape = sum(np.multiply(mapes, weights))
     avg_r2 = sum(np.multiply(r_squareds, weights))
 
+    mae_std = math.sqrt(np.average((maes-avg_mae)**2, weights=weights))
+    rmse_std = math.sqrt(np.average((rmses-avg_rmse)**2, weights=weights))
+    mape_std = math.sqrt(np.average((mapes-avg_mape)**2, weights=weights))
+    r2_std = math.sqrt(np.average((r_squareds-avg_r2)**2, weights=weights))
+
     weighted_fis = [fi * weight for fi, weight in zip(fis, weights)]
     avg_fi = np.array(weighted_fis).sum(axis=0)
 
     print("")
     print("Weighted metrics:")
-    print(f"MAE:  {round(avg_mae)}")
-    print(f"RMSE: {round(avg_rmse)}")
-    print(f"MAPE: {round(avg_mape, 2)}%")
-    print(f"R^2:  {round(avg_r2, 3)}")
+    print(f"MAE:  {round(avg_mae)} \u00B1 {round(mae_std)}")
+    print(f"RMSE: {round(avg_rmse)} \u00B1 {round(rmse_std)}")
+    print(f"MAPE: {round(avg_mape, 2)} \u00B1 {round(mape_std, 2)}%")
+    print(f"R^2:  {round(avg_r2, 3)} \u00B1 {round(r2_std, 3)}")
 
-    return error_df_soos, col_names, avg_fi, [maes, rmses, mapes, r_squareds]
+    if return_std:
+        return error_df_soos, col_names, avg_fi, [maes, rmses, mapes, r_squareds], [mae_std, rmse_std, mape_std, r2_std]
+    else:
+        return error_df_soos, col_names, avg_fi, [maes, rmses, mapes, r_squareds]
