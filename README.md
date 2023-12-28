@@ -1,5 +1,9 @@
 # Wikipedia Real Estate
 
+<p align="center">
+  <img src="visualizations/wikipedia_usa_coverage.png" alt="drawing" width="800"/>
+</p>
+
 ## Downloading data and creating ML features
 To download and preprocess structured housing data, the notebook
 ``download_basic.ipynb`` needs to be run. To download data about asset types,
